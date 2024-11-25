@@ -12,6 +12,11 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
+      ANDROID_NDK_HOME: ${{ github.workspace }}/android-ndk
+      PATH: ${{ github.workspace }}/android-sdk/cmdline-tools/latest/bin:${{ github.workspace }}/android-ndk:$PATH
+
     steps:
       # Step 1: Checkout the repository
       - name: Checkout Repository
@@ -19,74 +24,40 @@ jobs:
         with:
           ref: ${{ inputs.build_tag }}
 
-      # Step 2: Cache Android NDK
-      - name: Cache Android NDK
-        uses: actions/cache@v3
-        with:
-          path: android-ndk
-          key: ndk-r25b
+      - name: Set Up Android SDK
+        run: |
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          curl -sSL https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -o cmdline-tools.zip
+          unzip cmdline-tools.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+          yes | sdkmanager --sdk_root=$ANDROID_HOME --licenses
+          sdkmanager --sdk_root=$ANDROID_HOME "platform-tools" "platforms;android-21"
 
-      - name: Download Android NDK if Not Cached
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Set Up Android NDK
         run: |
           curl -sSL https://dl.google.com/android/repository/android-ndk-r25b-linux.zip -o android-ndk.zip
-          unzip android-ndk.zip -d .
-          mv android-ndk-r25b android-ndk
+          unzip android-ndk.zip -d ${{ runner.temp }}
+          mv ${{ runner.temp }}/android-ndk-r25b $ANDROID_NDK_HOME
 
-      # Step 3: Cache Dependencies
-      - name: Cache Build Dependencies
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cmake
-            /usr/include
-            /usr/lib
-          key: build-deps-${{ runner.os }}-${{ inputs.build_tag }}
-
-      # Step 4: Install Dependencies if Not Cached
       - name: Install Build Dependencies
-        if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt update
-          sudo apt install -y build-essential cmake zip
+          sudo apt-get update
+          sudo apt-get install -y build-essential libffi-dev libssl-dev zlib1g-dev
 
-      # Step 5: Build for armeabi-v7a
-      - name: Configure Build for armeabi-v7a
+      - name: Build for armeabi-v7a
         run: |
-          export ANDROID_NDK_HOME=$PWD/android-ndk
-          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           cd Android
-          ./configure.sh --api-level=21 --target-abi=armeabi-v7a
+          ./android.py build armeabi-v7a
 
-      - name: Build Python for armeabi-v7a
+      - name: Build for x86_64
         run: |
-          export ANDROID_NDK_HOME=$PWD/android-ndk
-          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
           cd Android
-          make -j$(nproc)
+          ./android.py build x86_64
 
-      # Step 6: Build for x86_64
-      - name: Configure Build for x86_64
-        run: |
-          export ANDROID_NDK_HOME=$PWD/android-ndk
-          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-          cd Android
-          ./configure.sh --api-level=21 --target-abi=x86_64
-
-      - name: Build Python for x86_64
-        run: |
-          export ANDROID_NDK_HOME=$PWD/android-ndk
-          export PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-          cd Android
-          make -j$(nproc)
-
-      # Step 7: Upload Build Artifacts
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: python-android-build
+          name: cpython-android-build
           path: |
-            Android/build/lib.android-21-armeabi-v7a/libpython3.13m.so
-            Android/build/lib.android-21-armeabi-v7a/python
-            Android/build/lib.android-21-x86_64/libpython3.13m.so
-            Android/build/lib.android-21-x86_64/python
+            cross-build/armeabi-v7a
+            cross-build/x86_64
